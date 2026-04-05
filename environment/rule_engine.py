@@ -222,54 +222,77 @@ class PolicyRuleEngine:
         
         return max(0.5, min(0.95, confidence))
     
-    def compute_reward(self, agent_action: ReasoningOutput, 
-                      ground_truth: Dict[str, Any],
-                      step_count: int,
-                      max_steps: int = 6) -> Dict[str, float]:
-        """Compute reward based on agent's reasoning and ground truth"""
-        
-        # Decision accuracy (0.4 weight)
-        decision_correct = agent_action.recommendation == ground_truth["correct_action"]
-        decision_score = 1.0 if decision_correct else 0.0
-        
-        # Fraud detection quality (0.3 weight)
-        fraud_detected = len(agent_action.fraud_indicators) > 0
-        actual_fraud = ground_truth["fraud_label"]
-        
-        if actual_fraud and fraud_detected:
-            fraud_score = 1.0
-        elif not actual_fraud and not fraud_detected:
-            fraud_score = 1.0
-        elif actual_fraud and not fraud_detected:
-            fraud_score = 0.0  # Missed fraud
-        else:
-            fraud_score = 0.5  # False positive
-        
-        # Reasoning quality (0.2 weight)
-        reasoning_score = self._evaluate_reasoning(agent_action, ground_truth)
-        
-        # Action efficiency (0.1 weight)
-        efficiency_score = max(0, 1 - (step_count / max_steps))
-        
-        # Step penalty for repeated actions or inefficiency
-        step_penalty = 0.0
-        
-        # Combine scores
-        total_score = (
-            0.4 * decision_score +
-            0.3 * fraud_score +
-            0.2 * reasoning_score +
-            0.1 * efficiency_score -
-            step_penalty
-        )
-        
-        return {
-            "total": total_score,
-            "decision": decision_score,
-            "fraud_detection": fraud_score,
-            "reasoning": reasoning_score,
-            "efficiency": efficiency_score
-        }
+    def compute_reward(self, agent_action: ReasoningOutput,
+                  ground_truth: Dict[str, Any],
+                  step_count: int,
+                  max_steps: int = 6) -> Dict[str, float]:
+    """Compute reward based on agent's reasoning and ground truth"""
+
+    # Decision accuracy (0.4 weight)
+    decision_correct = agent_action.recommendation == ground_truth["correct_action"]
+    decision_score = 1.0 if decision_correct else 0.0
+
+    # Partial credit for close decisions
+    close_decisions = {
+        ("escalate_claim", "reject_claim"): 0.3,
+        ("reject_claim", "escalate_claim"): 0.3,
+        ("approve_claim", "escalate_claim"): 0.1,
+        ("request_additional_info", "escalate_claim"): 0.4,
+        ("request_additional_info", "approve_claim"): 0.2,
+    }
+    if not decision_correct:
+        pair = (agent_action.recommendation, ground_truth["correct_action"])
+        decision_score = close_decisions.get(pair, 0.0)
+
+    # Fraud detection quality (0.3 weight)
+    fraud_detected = len(agent_action.fraud_indicators) > 0
+    actual_fraud = ground_truth["fraud_label"]
+
+    if actual_fraud and fraud_detected:
+        # Bonus for detecting multiple indicators
+        fraud_score = min(1.0, 0.7 + len(agent_action.fraud_indicators) * 0.1)
+    elif not actual_fraud and not fraud_detected:
+        fraud_score = 1.0
+    elif actual_fraud and not fraud_detected:
+        fraud_score = 0.0
+    else:
+        # False positive - penalize but not harshly
+        fraud_score = 0.3
+
+    # Reasoning quality (0.2 weight)
+    reasoning_score = self._evaluate_reasoning(agent_action, ground_truth)
+
+    # Confidence calibration bonus
+    if decision_correct and agent_action.confidence > 0.7:
+        reasoning_score = min(1.0, reasoning_score + 0.1)
+    elif not decision_correct and agent_action.confidence > 0.8:
+        reasoning_score = max(0.0, reasoning_score - 0.1)
+
+    # Action efficiency (0.1 weight)
+    efficiency_score = max(0, 1 - (step_count / max_steps))
+
+    # Step penalty
+    step_penalty = 0.0
+    if step_count > max_steps * 0.75:
+        step_penalty = 0.05
+
+    # Combine scores
+    total_score = (
+        0.4 * decision_score +
+        0.3 * fraud_score +
+        0.2 * reasoning_score +
+        0.1 * efficiency_score -
+        step_penalty
+    )
+
+    return {
+        "total": total_score,
+        "decision": decision_score,
+        "fraud_detection": fraud_score,
+        "reasoning": reasoning_score,
+        "efficiency": efficiency_score,
+        "step_penalty": step_penalty
+    }
     
     def _evaluate_reasoning(self, agent_reasoning: ReasoningOutput,
                            ground_truth: Dict[str, Any]) -> float:

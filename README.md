@@ -1,3 +1,11 @@
+---
+title: Insurance Claim Validation
+emoji: 🏢
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
 # Insurance Claim Validation Environment
 
 An OpenEnv-compatible RL environment for training AI agents to validate insurance claims and detect fraud.

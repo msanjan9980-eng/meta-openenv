@@ -25,6 +25,18 @@ app.add_middleware(
 environments: Dict[str, InsuranceClaimEnvironment] = {}
 episode_histories: Dict[str, List[Dict]] = {}
 leaderboard: List[Dict] = []
+episode_replays: Dict[str, List[Dict]] = {}
+difficulty_tracker: Dict[str, str] = {}
+environment_stats: Dict[str, Any] = {
+    "total_episodes": 0,
+    "total_steps": 0,
+    "total_approved": 0,
+    "total_rejected": 0,
+    "total_escalated": 0,
+    "total_fraud_detected": 0,
+    "avg_reward": 0.0,
+    "all_rewards": []
+}
 
 def get_or_create_env(session_id: str) -> InsuranceClaimEnvironment:
     if session_id not in environments:
@@ -35,17 +47,22 @@ def get_or_create_env(session_id: str) -> InsuranceClaimEnvironment:
 def root():
     return {
         "name": "Insurance Claim Validation Environment",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "description": "OpenEnv-compatible RL environment for insurance claim validation",
         "endpoints": {
-            "POST /reset": "Reset environment and get initial observation",
-            "POST /step": "Take a step with a ClaimAction",
-            "GET /state": "Get current environment state",
-            "GET /schema": "Get action and observation schemas",
+            "POST /reset": "Reset environment",
+            "POST /step": "Take a step",
+            "GET /state": "Current state",
+            "GET /schema": "Action/observation schemas",
             "GET /health": "Health check",
-            "GET /scenarios": "List all available scenarios",
-            "GET /metrics": "Get environment metrics",
-            "WS /ws/{session_id}": "WebSocket for real-time interaction"
+            "GET /scenarios": "List all scenarios",
+            "GET /scenarios/filter": "Filter scenarios by tag or difficulty",
+            "GET /metrics": "Episode metrics",
+            "GET /stats": "Global environment statistics",
+            "GET /replay/{session_id}": "Replay episode",
+            "POST /leaderboard": "Submit score",
+            "GET /leaderboard": "Get leaderboard",
+            "WS /ws/{session_id}": "WebSocket connection"
         }
     }
 
@@ -148,11 +165,52 @@ def step(request: StepRequest):
     }
     if session_id not in episode_histories:
         episode_histories[session_id] = []
+    if session_id not in episode_replays:
+        episode_replays[session_id] = []
+
+    step_record = {
+        "step": info["step"],
+        "action": request.action.dict(),
+        "reward": reward,
+        "done": done,
+        "observation": obs.dict(),
+        "timestamp": datetime.now().isoformat()
+    }
     episode_histories[session_id].append({
         "action": request.action.dict(),
         "reward": reward,
         "done": done
     })
+    episode_replays[session_id].append(step_record)
+
+    # Update global stats
+    environment_stats["total_steps"] += 1
+    action_name = request.action.action
+    if action_name == "approve_claim":
+        environment_stats["total_approved"] += 1
+    elif action_name == "reject_claim":
+        environment_stats["total_rejected"] += 1
+    elif action_name == "escalate_claim":
+        environment_stats["total_escalated"] += 1
+    if request.action.reasoning.fraud_indicators:
+        environment_stats["total_fraud_detected"] += 1
+
+    if done:
+        environment_stats["total_episodes"] += 1
+        environment_stats["all_rewards"].append(reward)
+        environment_stats["avg_reward"] = sum(
+            environment_stats["all_rewards"]) / len(environment_stats["all_rewards"])
+
+        # Auto-scale difficulty
+        history = episode_histories.get(session_id, [])
+        rewards = [h["reward"] for h in history]
+        avg = sum(rewards) / len(rewards) if rewards else 0
+        current_difficulty = difficulty_tracker.get(session_id, "easy")
+        if avg > 0.8 and current_difficulty == "easy":
+            difficulty_tracker[session_id] = "medium"
+        elif avg > 0.8 and current_difficulty == "medium":
+            difficulty_tracker[session_id] = "hard"
+
     return result
 
 @app.get("/state")
@@ -195,6 +253,59 @@ def submit_score(session_id: str = "default", agent_name: str = "anonymous"):
     leaderboard.append(entry)
     leaderboard.sort(key=lambda x: x["total_reward"], reverse=True)
     return {"message": "Score submitted", "entry": entry}
+
+@app.get("/replay/{session_id}")
+def get_replay(session_id: str):
+    replay = episode_replays.get(session_id, [])
+    if not replay:
+        return {"message": "No replay available for this session"}
+    return {
+        "session_id": session_id,
+        "total_steps": len(replay),
+        "replay": replay
+    }
+
+@app.get("/stats")
+def get_stats():
+    return {
+        "total_episodes": environment_stats["total_episodes"],
+        "total_steps": environment_stats["total_steps"],
+        "total_approved": environment_stats["total_approved"],
+        "total_rejected": environment_stats["total_rejected"],
+        "total_escalated": environment_stats["total_escalated"],
+        "total_fraud_detected": environment_stats["total_fraud_detected"],
+        "avg_reward": round(environment_stats["avg_reward"], 3),
+        "approval_rate": round(
+            environment_stats["total_approved"] /
+            max(environment_stats["total_episodes"], 1), 3
+        ),
+        "fraud_detection_rate": round(
+            environment_stats["total_fraud_detected"] /
+            max(environment_stats["total_steps"], 1), 3
+        )
+    }
+
+@app.get("/scenarios/filter")
+def filter_scenarios(tag: str = None, difficulty: str = None):
+    from environment.scenarios import ScenarioGenerator
+    gen = ScenarioGenerator()
+    filtered = gen.scenarios
+    if difficulty:
+        filtered = [s for s in filtered if s["difficulty"] == difficulty]
+    if tag:
+        filtered = [s for s in filtered if tag in s["tag"]]
+    return {
+        "total": len(filtered),
+        "scenarios": [
+            {
+                "id": s["id"],
+                "difficulty": s["difficulty"],
+                "tag": s["tag"],
+                "description": s["description"]
+            }
+            for s in filtered
+        ]
+    }
 
 @app.get("/leaderboard")
 def get_leaderboard():

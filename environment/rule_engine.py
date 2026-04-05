@@ -31,7 +31,6 @@ class PolicyRuleEngine:
             "confidence": 0.0
         }
         
-        # Generate recommended action based on rules
         if results["policy_violations"]:
             results["recommended_action"] = "reject_claim"
             results["confidence"] = 0.9
@@ -54,22 +53,18 @@ class PolicyRuleEngine:
         """Check for policy violations"""
         violations = []
         
-        # Check coverage limits
         limit = obs.policy.coverage_limits.get(obs.claim.claim_type.value, 0)
         if obs.claim.amount > limit:
             violations.append(f"Claim amount ${obs.claim.amount} exceeds coverage limit ${limit}")
         
-        # Check waiting period
         days_since_policy = (obs.claim.incident_date - obs.policy.created_at).days
         if days_since_policy < obs.policy.waiting_period_days:
             violations.append(f"Incident occurred during waiting period ({days_since_policy} days)")
         
-        # Check exclusions
         for exclusion in obs.policy.excluded_conditions:
             if exclusion.lower() in obs.claim.description.lower():
                 violations.append(f"Claim involves excluded condition: {exclusion}")
         
-        # Check if policy is active
         if not obs.policy.active:
             violations.append("Policy is not active")
         
@@ -89,7 +84,7 @@ class PolicyRuleEngine:
         ratio = obs.claim.amount / avg
         
         return {
-            "valid": ratio <= 3.0,  # Within 3x average
+            "valid": ratio <= 3.0,
             "ratio": ratio,
             "is_high_value": ratio > 2.0,
             "is_low_value": ratio < 0.5
@@ -99,15 +94,14 @@ class PolicyRuleEngine:
         """Check document completeness and validity"""
         
         required = set(obs.policy.required_documents)
-        uploaded = {doc_type for doc_type, doc in obs.documents.items() 
+        uploaded = {doc_type for doc_type, doc in obs.documents.items()
                    if doc.status in [DocumentStatus.UPLOADED, DocumentStatus.VERIFIED]}
         
         missing = required - uploaded
-        pending = {doc_type for doc_type, doc in obs.documents.items() 
+        pending = {doc_type for doc_type, doc in obs.documents.items()
                   if doc.status == DocumentStatus.PENDING}
         
-        # Check for invalid/rejected documents
-        rejected = {doc_type for doc_type, doc in obs.documents.items() 
+        rejected = {doc_type for doc_type, doc in obs.documents.items()
                    if doc.status == DocumentStatus.REJECTED}
         
         return {
@@ -124,17 +118,14 @@ class PolicyRuleEngine:
         
         risk_score = obs.user_history.risk_score
         
-        # Update risk based on claim frequency
-        if obs.user_history.claim_frequency > 2.0:  # More than 2 claims per year
+        if obs.user_history.claim_frequency > 2.0:
             risk_score = min(1.0, risk_score + 0.2)
         
-        # Flag for recent claims
-        recent_claims = [c for c in obs.user_history.previous_claims 
+        recent_claims = [c for c in obs.user_history.previous_claims
                         if (datetime.now() - c.get("date", datetime.now())).days < 180]
         if len(recent_claims) > 2:
             risk_score = min(1.0, risk_score + 0.15)
         
-        # Check for flagged history
         if obs.user_history.flagged_previous:
             risk_score = min(1.0, risk_score + 0.3)
         
@@ -152,7 +143,6 @@ class PolicyRuleEngine:
         
         indicators = []
         
-        # Pattern 1: Amount just below limit
         limit = obs.policy.coverage_limits.get(obs.claim.claim_type.value, 0)
         if limit > 0 and obs.claim.amount > limit * 0.95:
             indicators.append({
@@ -161,7 +151,6 @@ class PolicyRuleEngine:
                 "description": f"Claim amount ${obs.claim.amount} is within 5% of limit ${limit}"
             })
         
-        # Pattern 2: Multiple claims in short period
         if obs.user_history.claim_frequency > 3.0:
             indicators.append({
                 "type": "high_claim_frequency",
@@ -169,7 +158,6 @@ class PolicyRuleEngine:
                 "description": f"Claim frequency {obs.user_history.claim_frequency:.1f} claims/year"
             })
         
-        # Pattern 3: Inconsistent dates
         days_diff = (obs.claim.filing_date - obs.claim.incident_date).days
         if days_diff < 1:
             indicators.append({
@@ -184,7 +172,6 @@ class PolicyRuleEngine:
                 "description": f"Claim filed {days_diff} days after incident"
             })
         
-        # Pattern 4: High value for first-time claimant
         if obs.user_history.total_claims == 0 and obs.claim.amount > 10000:
             indicators.append({
                 "type": "high_value_first_claim",
@@ -192,7 +179,6 @@ class PolicyRuleEngine:
                 "description": f"First-time claimant requesting ${obs.claim.amount}"
             })
         
-        # Pattern 5: Vague description
         if len(obs.claim.description.split()) < 10:
             indicators.append({
                 "type": "vague_description",
@@ -200,15 +186,26 @@ class PolicyRuleEngine:
                 "description": "Claim description is unusually brief"
             })
         
+        if obs.user_history.account_age_days < 30 and obs.claim.amount > 5000:
+            indicators.append({
+                "type": "new_account_high_value",
+                "severity": 0.75,
+                "description": f"Account only {obs.user_history.account_age_days} days old with ${obs.claim.amount} claim"
+            })
+        
+        if obs.user_history.flagged_previous and obs.user_history.claim_frequency > 2.0:
+            indicators.append({
+                "type": "repeat_offender",
+                "severity": 0.9,
+                "description": "Previously flagged user with high claim frequency"
+            })
+        
         return indicators
     
     def _calculate_confidence(self, results: Dict) -> float:
         """Calculate confidence in recommendation"""
         
-        # Base confidence
         confidence = 0.7
-        
-        # Adjust based on conflicting signals
         conflict_count = 0
         
         if results["policy_violations"] and not results["fraud_indicators"]:
@@ -223,83 +220,81 @@ class PolicyRuleEngine:
         return max(0.5, min(0.95, confidence))
     
     def compute_reward(self, agent_action: ReasoningOutput,
-                  ground_truth: Dict[str, Any],
-                  step_count: int,
-                  max_steps: int = 6) -> Dict[str, float]:
-    """Compute reward based on agent's reasoning and ground truth"""
-
-    # Decision accuracy (0.4 weight)
-    decision_correct = agent_action.recommendation == ground_truth["correct_action"]
-    decision_score = 1.0 if decision_correct else 0.0
-
-    # Partial credit for close decisions
-    close_decisions = {
-        ("escalate_claim", "reject_claim"): 0.3,
-        ("reject_claim", "escalate_claim"): 0.3,
-        ("approve_claim", "escalate_claim"): 0.1,
-        ("request_additional_info", "escalate_claim"): 0.4,
-        ("request_additional_info", "approve_claim"): 0.2,
-    }
-    if not decision_correct:
-        pair = (agent_action.recommendation, ground_truth["correct_action"])
-        decision_score = close_decisions.get(pair, 0.0)
-
-    # Fraud detection quality (0.3 weight)
-    fraud_detected = len(agent_action.fraud_indicators) > 0
-    actual_fraud = ground_truth["fraud_label"]
-
-    if actual_fraud and fraud_detected:
-        # Bonus for detecting multiple indicators
-        fraud_score = min(1.0, 0.7 + len(agent_action.fraud_indicators) * 0.1)
-    elif not actual_fraud and not fraud_detected:
-        fraud_score = 1.0
-    elif actual_fraud and not fraud_detected:
-        fraud_score = 0.0
-    else:
-        # False positive - penalize but not harshly
-        fraud_score = 0.3
-
-    # Reasoning quality (0.2 weight)
-    reasoning_score = self._evaluate_reasoning(agent_action, ground_truth)
-
-    # Confidence calibration bonus
-    if decision_correct and agent_action.confidence > 0.7:
-        reasoning_score = min(1.0, reasoning_score + 0.1)
-    elif not decision_correct and agent_action.confidence > 0.8:
-        reasoning_score = max(0.0, reasoning_score - 0.1)
-
-    # Action efficiency (0.1 weight)
-    efficiency_score = max(0, 1 - (step_count / max_steps))
-
-    # Step penalty
-    step_penalty = 0.0
-    if step_count > max_steps * 0.75:
-        step_penalty = 0.05
-
-    # Combine scores
-    total_score = (
-        0.4 * decision_score +
-        0.3 * fraud_score +
-        0.2 * reasoning_score +
-        0.1 * efficiency_score -
-        step_penalty
-    )
-
-    return {
-        "total": total_score,
-        "decision": decision_score,
-        "fraud_detection": fraud_score,
-        "reasoning": reasoning_score,
-        "efficiency": efficiency_score,
-        "step_penalty": step_penalty
-    }
+                      ground_truth: Dict[str, Any],
+                      step_count: int,
+                      max_steps: int = 6) -> Dict[str, float]:
+        """Compute reward based on agent's reasoning and ground truth"""
+        
+        # Decision accuracy (0.4 weight)
+        decision_correct = agent_action.recommendation == ground_truth["correct_action"]
+        decision_score = 1.0 if decision_correct else 0.0
+        
+        # Partial credit for close decisions
+        close_decisions = {
+            ("escalate_claim", "reject_claim"): 0.3,
+            ("reject_claim", "escalate_claim"): 0.3,
+            ("approve_claim", "escalate_claim"): 0.1,
+            ("request_additional_info", "escalate_claim"): 0.4,
+            ("request_additional_info", "approve_claim"): 0.2,
+        }
+        if not decision_correct:
+            pair = (agent_action.recommendation, ground_truth["correct_action"])
+            decision_score = close_decisions.get(pair, 0.0)
+        
+        # Fraud detection quality (0.3 weight)
+        fraud_detected = len(agent_action.fraud_indicators) > 0
+        actual_fraud = ground_truth["fraud_label"]
+        
+        if actual_fraud and fraud_detected:
+            fraud_score = min(1.0, 0.7 + len(agent_action.fraud_indicators) * 0.1)
+        elif not actual_fraud and not fraud_detected:
+            fraud_score = 1.0
+        elif actual_fraud and not fraud_detected:
+            fraud_score = 0.0
+        else:
+            fraud_score = 0.3
+        
+        # Reasoning quality (0.2 weight)
+        reasoning_score = self._evaluate_reasoning(agent_action, ground_truth)
+        
+        # Confidence calibration bonus
+        if decision_correct and agent_action.confidence > 0.7:
+            reasoning_score = min(1.0, reasoning_score + 0.1)
+        elif not decision_correct and agent_action.confidence > 0.8:
+            reasoning_score = max(0.0, reasoning_score - 0.1)
+        
+        # Action efficiency (0.1 weight)
+        efficiency_score = max(0, 1 - (step_count / max_steps))
+        
+        # Step penalty
+        step_penalty = 0.0
+        if step_count > max_steps * 0.75:
+            step_penalty = 0.05
+        
+        # Combine scores
+        total_score = (
+            0.4 * decision_score +
+            0.3 * fraud_score +
+            0.2 * reasoning_score +
+            0.1 * efficiency_score -
+            step_penalty
+        )
+        
+        return {
+            "total": total_score,
+            "decision": decision_score,
+            "fraud_detection": fraud_score,
+            "reasoning": reasoning_score,
+            "efficiency": efficiency_score,
+            "step_penalty": step_penalty
+        }
     
     def _evaluate_reasoning(self, agent_reasoning: ReasoningOutput,
                            ground_truth: Dict[str, Any]) -> float:
         """Evaluate reasoning quality against ground truth factors"""
         
         factors = [
-            ("policy_violation", agent_reasoning.policy_violation, 
+            ("policy_violation", agent_reasoning.policy_violation,
              ground_truth.get("has_policy_violation", False)),
             ("claim_amount_valid", agent_reasoning.claim_amount_valid,
              ground_truth.get("amount_valid", True)),

@@ -24,6 +24,7 @@ app.add_middleware(
 # Store multiple environments for concurrent sessions
 environments: Dict[str, InsuranceClaimEnvironment] = {}
 episode_histories: Dict[str, List[Dict]] = {}
+leaderboard: List[Dict] = []
 
 def get_or_create_env(session_id: str) -> InsuranceClaimEnvironment:
     if session_id not in environments:
@@ -173,6 +174,33 @@ def metrics(session_id: str = "default"):
         "max_reward": max(rewards),
         "min_reward": min(rewards),
         "actions_taken": [h["action"]["action"] for h in history]
+    }
+
+@app.post("/leaderboard")
+def submit_score(session_id: str = "default", agent_name: str = "anonymous"):
+    history = episode_histories.get(session_id, [])
+    if not history:
+        return {"message": "No episode history available"}
+    rewards = [h["reward"] for h in history]
+    total_reward = sum(rewards)
+    avg_reward = total_reward / len(rewards)
+    entry = {
+        "agent_name": agent_name,
+        "session_id": session_id,
+        "total_steps": len(history),
+        "total_reward": round(total_reward, 3),
+        "avg_reward": round(avg_reward, 3),
+        "timestamp": datetime.now().isoformat()
+    }
+    leaderboard.append(entry)
+    leaderboard.sort(key=lambda x: x["total_reward"], reverse=True)
+    return {"message": "Score submitted", "entry": entry}
+
+@app.get("/leaderboard")
+def get_leaderboard():
+    return {
+        "leaderboard": leaderboard[:10],
+        "total_entries": len(leaderboard)
     }
 
 @app.websocket("/ws/{session_id}")

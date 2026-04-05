@@ -1,4 +1,4 @@
-# Insurance Claim Validation Environment
+﻿# Insurance Claim Validation Environment
 
 An OpenEnv-compatible RL environment for training AI agents to validate insurance claims and detect fraud.
 
@@ -14,7 +14,7 @@ Built for the Meta PyTorch OpenEnv Hackathon 2026.
 This environment simulates a real-world insurance claim validation system where an AI agent must:
 1. Analyze incoming insurance claims
 2. Detect fraud patterns and suspicious behavior
-3. Make decisions — approve, reject, escalate, or request more info
+3. Make decisions â€” approve, reject, escalate, or request more info
 4. Reason about policy rules, user history, and document completeness
 
 ## Actions Available
@@ -94,16 +94,16 @@ curl https://sanjan-m-insurance-claim-validation.hf.space/scenarios
 
 ## Architecture
 
-environment/core.py — Main environment logic
-environment/schemas.py — Data models
-environment/rule_engine.py — Policy validation and fraud detection
-environment/scenarios.py — 17 claim scenarios
-environment/grader.py — Episode grading
-inference/baseline_agent.py — LLM baseline agent
-inference/evaluate.py — Evaluation script
-server/app.py — FastAPI server
-inference.py — Main inference script
-openenv.yaml — Environment manifest
+environment/core.py â€” Main environment logic
+environment/schemas.py â€” Data models
+environment/rule_engine.py â€” Policy validation and fraud detection
+environment/scenarios.py â€” 17 claim scenarios
+environment/grader.py â€” Episode grading
+inference/baseline_agent.py â€” LLM baseline agent
+inference/evaluate.py â€” Evaluation script
+server/app.py â€” FastAPI server
+inference.py â€” Main inference script
+openenv.yaml â€” Environment manifest
 
 ## License
 BSD-3-Clause

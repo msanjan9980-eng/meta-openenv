@@ -4,24 +4,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""
-Data models for the My Env2 Environment.
+"""Package-facing aliases for the insurance claim validation environment."""
 
-The my_env2 environment is a simple test environment that echoes back messages.
-"""
+from environment.schemas import ClaimAction, ClaimObservation
 
-from openenv.core.env_server.types import Action, Observation
-from pydantic import Field
+MyEnv2Action = ClaimAction
+MyEnv2Observation = ClaimObservation
 
-
-class MyEnv2Action(Action):
-    """Action for the My Env2 environment - just a message to echo."""
-
-    message: str = Field(..., description="Message to echo back")
-
-
-class MyEnv2Observation(Observation):
-    """Observation from the My Env2 environment - the echoed message."""
-
-    echoed_message: str = Field(default="", description="The echoed message")
-    message_length: int = Field(default=0, description="Length of the echoed message")
+__all__ = [
+    "ClaimAction",
+    "ClaimObservation",
+    "MyEnv2Action",
+    "MyEnv2Observation",
+]

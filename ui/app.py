@@ -31,7 +31,9 @@ class InsuranceClaimUI:
         while not done:
             action = self.agent.get_action(obs)
             actions.append(action)
-            obs, reward, done, info = self.env.step(action)
+            obs = self.env.step(action)
+            done = bool(obs.done)
+            info = self.env.last_step_info
         
         # Grade episode
         result = self.grader.grade_episode(
@@ -55,7 +57,7 @@ class InsuranceClaimUI:
             },
             "agent_decision": {
                 "action": actions[-1].action,
-                "reasoning": actions[-1].reasoning.dict(),
+                "reasoning": actions[-1].reasoning.model_dump(),
                 "confidence": actions[-1].reasoning.confidence
             },
             "evaluation": {

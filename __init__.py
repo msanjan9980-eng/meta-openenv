@@ -1,16 +1,20 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+﻿# Insurance Claim Validation Environment
+from environment.core import InsuranceClaimEnvironment
 
-"""My Env2 Environment."""
+try:
+    from models import ClaimAction, ClaimObservation
+except ImportError:
+    from environment.schemas import ClaimAction, ClaimObservation
 
-from .client import MyEnv2Env
-from .models import MyEnv2Action, MyEnv2Observation
+MyEnv2Action = ClaimAction
+MyEnv2Observation = ClaimObservation
+MyEnv2Environment = InsuranceClaimEnvironment
 
 __all__ = [
+    "InsuranceClaimEnvironment",
+    "MyEnv2Environment",
+    "ClaimAction",
+    "ClaimObservation",
     "MyEnv2Action",
     "MyEnv2Observation",
-    "MyEnv2Env",
 ]

@@ -1,0 +1,92 @@
+Metadata-Version: 2.4
+Name: openenv-insurance-claim-validation
+Version: 0.1.0
+Summary: Insurance claim validation RL environment for OpenEnv
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: openenv-core[core]>=0.2.2
+Requires-Dist: pydantic>=2.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: httpx>=0.27.0; extra == "dev"
+
+# Insurance Claim Validation (OpenEnv)
+
+Reinforcement learning environment for sequential insurance claim review: partial observations, discrete actions, and rewards in `[0, 1]`.
+
+## Features
+
+- **18 scenarios** (easy / medium / hard) with ground truth for fraud, policy violations, and target actions.
+- **Actions**: `analyze_claim`, `detect_fraud_signals`, `approve_claim`, `reject_claim`, `escalate_claim`, `request_additional_info`, `ignore`.
+- **Rewards**: Dense per-step signal plus terminal aggregate  
+  `0.5 × avg(step rewards) + 0.5 × R_final_outcome` (see PRD).
+- **API**: OpenEnv FastAPI (`POST /reset`, `POST /step`, `GET /state`, `WebSocket /ws/{session_id}`) plus session-based `/episode/*` routes.
+
+## Install
+
+```bash
+cd my_env
+pip install -e .
+```
+
+## Run server
+
+```bash
+uvicorn insurance_claim_validation.server.app:app --host 0.0.0.0 --port 7860
+```
+
+Set `ENABLE_WEB_INTERFACE=true` for the bundled Gradio UI at `/web` (requires Gradio from `openenv-core`).
+
+## Docker
+
+```bash
+docker build -t insurance-claim-env .
+docker run -p 7860:7860 insurance-claim-env
+```
+
+## Python usage
+
+```python
+from insurance_claim_validation import InsuranceClaimEnvironment, ClaimAction
+from insurance_claim_validation.environment.schemas import ReasoningOutput
+
+env = InsuranceClaimEnvironment({"max_steps": 6})
+obs = env.reset(scenario_id="easy_001")
+action = ClaimAction(
+    action="approve_claim",
+    reasoning=ReasoningOutput(
+        policy_violation=False,
+        claim_amount_valid=True,
+        user_risk_high=False,
+        documents_complete=True,
+        fraud_indicators=[],
+        confidence=0.9,
+        recommendation="approve_claim",
+    ),
+)
+obs = env.step(action)
+print(obs.reward, obs.done, obs.metadata)
+```
+
+## Client (remote)
+
+```python
+import asyncio
+from insurance_claim_validation.client import InsuranceClaimEnvClient
+from insurance_claim_validation import ClaimAction
+from insurance_claim_validation.environment.schemas import ReasoningOutput
+
+async def main():
+    async with InsuranceClaimEnvClient(base_url="http://localhost:7860") as client:
+        r = await client.reset()
+        r = await client.step(ClaimAction(
+            action="analyze_claim",
+            reasoning=ReasoningOutput(confidence=0.5),
+        ))
+
+asyncio.run(main())
+```
+
+## License
+
+BSD-3-Clause (see Meta OpenEnv ecosystem).

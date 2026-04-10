@@ -1,0 +1,2 @@
+[console_scripts]
+server = insurance_claim_validation.server.app:main

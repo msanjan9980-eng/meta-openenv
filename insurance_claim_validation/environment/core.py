@@ -31,11 +31,13 @@ from insurance_claim_validation.environment.rewards import (
     compute_final_outcome_reward,
     compute_step_reward,
     docs_complete_from_documents,
+    squeeze_to_open_interval,
 )
+from insurance_claim_validation.environment.stochastic import perturb_scenario_for_episode
 
 
 class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State]):
-    """Multi-step claim validation with partial observations and bounded rewards."""
+    """Multi-step claim validation with partial observations and validator-safe rewards."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
 
@@ -46,12 +48,14 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
         self.rule_engine = PolicyRuleEngine()
         self.scenario_gen = ScenarioGenerator()
 
+        self._scenario_template: Optional[Dict[str, Any]] = None
         self._scenario: Optional[Dict[str, Any]] = None
+        self._rng: random.Random = random.Random()
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._done = False
         self._action_history: List[ClaimAction] = []
         self._revealed: Set[str] = set()
-        self._step_rewards: List[float] = []
+        self._step_rewards_canonical: List[float] = []
         self._documents: Dict[str, Document] = {}
         self._risk_signals: List[RiskSignal] = []
         self.last_step_info: Dict[str, Any] = {}
@@ -63,12 +67,14 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> ClaimObservation:
-        if seed is not None:
-            random.seed(seed)
         scenario_id = kwargs.get("scenario_id")
         difficulty = kwargs.get("difficulty")
 
-        self._scenario = self.scenario_gen.get_scenario(scenario_id, difficulty)
+        self._rng = random.Random(seed if seed is not None else random.randrange(2**31))
+        base = self.scenario_gen.get_scenario(scenario_id, difficulty)
+        self._scenario_template = copy.deepcopy(base)
+        self._scenario = perturb_scenario_for_episode(base, self._rng)
+
         self._state = State(
             episode_id=episode_id or str(uuid4()),
             step_count=0,
@@ -76,19 +82,20 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
         self._done = False
         self._action_history = []
         self._revealed = {"claim"}
-        self._step_rewards = []
+        self._step_rewards_canonical = []
         self._reset_rubric()
 
         self._documents = self._build_documents_from_scenario(self._scenario)
         self._risk_signals = self._parse_risk_signals(self._scenario.get("risk_signals", []))
 
         obs = self._make_observation()
-        obs.reward = 0.0
+        obs.reward = squeeze_to_open_interval(0.5)
         obs.done = False
         obs.metadata = {
             "scenario_id": self._scenario["id"],
             "difficulty": self._scenario["difficulty"],
             "tag": self._scenario["tag"],
+            "episode_id": self._state.episode_id,
         }
         self.last_step_info = {}
         return self._apply_transform(obs)
@@ -111,13 +118,13 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
 
         self._process_action(action)
 
-        gt = self._scenario["ground_truth"]
+        gt = self._scenario_template["ground_truth"]
         complete = docs_complete_from_documents(
             {k: v.model_dump() for k, v in self._documents.items()},
             list(self._scenario["policy"]["required_documents"]),
         )
-        r_step, step_comp = compute_step_reward(action, prev, gt, complete)
-        self._step_rewards.append(r_step)
+        r_step_canon, step_comp = compute_step_reward(action, prev, gt, complete)
+        self._step_rewards_canonical.append(r_step_canon)
 
         terminal_actions = {
             "approve_claim",
@@ -129,25 +136,35 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
 
         if terminal:
             self._done = True
-            r_final, final_comp = compute_final_outcome_reward(
+            r_final_canon, final_comp = compute_final_outcome_reward(
                 self._action_history,
                 gt,
                 self._state.step_count,
                 self.max_steps,
             )
-            total = aggregate_episode_reward(self._step_rewards, r_final)
+            # Average step quality excludes terminal step to avoid double-counting decisions
+            pre_terminal = (
+                self._step_rewards_canonical[:-1]
+                if len(self._step_rewards_canonical) >= 1
+                else []
+            )
+            episode_canon = aggregate_episode_reward(pre_terminal, r_final_canon)
+            total = squeeze_to_open_interval(episode_canon)
+
             info = {
                 "decision": final_comp["decision"],
                 "fraud_detection": final_comp["fraud_detection"],
                 "reasoning": final_comp["reasoning"],
                 "efficiency": final_comp["efficiency"],
-                "r_final_outcome": r_final,
-                "avg_step_reward": (
-                    sum(self._step_rewards) / len(self._step_rewards)
-                    if self._step_rewards
-                    else 0.0
+                "sequence_readiness": final_comp.get("sequence_readiness"),
+                "canonical_episode": episode_canon,
+                "canonical_final_outcome": r_final_canon,
+                "reward_squeezed": total,
+                "avg_step_canonical": (
+                    sum(pre_terminal) / len(pre_terminal) if pre_terminal else None
                 ),
-                "step_components": step_comp,
+                "step_components_last": step_comp,
+                "final_components": final_comp,
             }
             self.last_step_info = info
             obs = self._make_observation()
@@ -158,28 +175,24 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
                 "scenario_id": self._scenario["id"],
                 "difficulty": self._scenario["difficulty"],
                 "tag": self._scenario["tag"],
+                "episode_id": self._state.episode_id,
                 "reward_info": info,
-                "ground_truth": {
-                    k: v
-                    for k, v in gt.items()
-                    if k
-                    in (
-                        "correct_action",
-                        "fraud_label",
-                        "has_policy_violation",
-                    )
-                },
             }
             return self._apply_transform(obs)
 
-        self.last_step_info = {"step_components": step_comp, "r_step": r_step}
+        self.last_step_info = {
+            "step_components": step_comp,
+            "canonical_step": r_step_canon,
+            "reward_squeezed": squeeze_to_open_interval(r_step_canon),
+        }
         obs = self._make_observation()
-        obs.reward = r_step
+        obs.reward = squeeze_to_open_interval(r_step_canon)
         obs.done = False
         obs.metadata = {
             "scenario_id": self._scenario["id"],
             "difficulty": self._scenario["difficulty"],
             "tag": self._scenario["tag"],
+            "episode_id": self._state.episode_id,
             "step_components": step_comp,
         }
         return self._apply_transform(obs)
@@ -215,8 +228,14 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
             self._risk_signals.append(
                 RiskSignal(
                     signal_type="agent_analysis",
-                    description="Fraud desk review triggered by agent",
-                    severity=min(1.0, 0.5 + 0.1 * len(action.reasoning.fraud_indicators)),
+                    description="Desk review triggered (model-assisted)",
+                    severity=min(
+                        0.94,
+                        max(
+                            0.08,
+                            0.45 + 0.07 * len(action.reasoning.fraud_indicators),
+                        ),
+                    ),
                 )
             )
         elif name == "request_additional_info":
@@ -258,7 +277,7 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
         policy = self._mask_policy(sc["policy"])
         user = self._mask_user(sc["user"])
 
-        violations: List[str] = []
+        uw: Dict[str, float] = {}
         if "violations" in self._revealed:
             full_pol = PolicyInfo(
                 policy_id=f"POL_{sc['id']}", **copy.deepcopy(sc["policy"])
@@ -272,10 +291,12 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
                 user_history=full_user,
                 documents=self._documents,
                 risk_signals=self._risk_signals,
+                policy_violations=[],
+                underwriting_signals={},
                 done=False,
                 reward=0.0,
             )
-            violations = self.rule_engine.evaluate(temp_full)["policy_violations"]
+            uw = self.rule_engine.underwriting_signal_scores(temp_full, self._rng)
 
         obs = ClaimObservation(
             claim=claim,
@@ -288,7 +309,8 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
                 if self._action_history
                 else None
             },
-            policy_violations=violations if "violations" in self._revealed else [],
+            policy_violations=[],
+            underwriting_signals=uw,
             step_count=self._state.step_count,
             action_history=[a.action for a in self._action_history],
             partial_observation=len(self._revealed) < 4,

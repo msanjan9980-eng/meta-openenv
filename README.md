@@ -42,13 +42,13 @@ This environment simulates a real-world insurance claim validation system where 
 - Reasoning Quality: 20%
 - Action Efficiency: 10%
 
-Reward Range: 0.0 to 1.0
+Returned rewards are mapped to a **strict open interval** (never exactly `0.0` or `1.0`): canonical scores are computed from soft partial credit, then squeezed with a small epsilon margin. Step rewards are averaged (terminal step excluded from the average) and combined once with the terminal outcome. See `environment/rewards.py`.
 
 ## Scenarios
 
-17 scenarios across 3 difficulty levels:
+18 scenarios across 3 difficulty levels:
 
-Easy (5 scenarios):
+Easy (6 scenarios):
 - Clean auto claim
 - Policy limit violation
 - Clean health claim

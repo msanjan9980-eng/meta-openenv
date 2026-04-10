@@ -47,6 +47,7 @@ class ClaimObservation(Observation):
     risk_signals: List[RiskSignal] = Field(default_factory=list)
     derived_signals: Dict[str, Any] = Field(default_factory=dict)
     policy_violations: List[str] = Field(default_factory=list)
+    underwriting_signals: Dict[str, float] = Field(default_factory=dict)
     step_count: int = 0
     action_history: List[str] = Field(default_factory=list)
     partial_observation: bool = True

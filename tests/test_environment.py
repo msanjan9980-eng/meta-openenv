@@ -19,14 +19,16 @@ def _r(**kwargs):
 
 
 def test_episode_terminates_and_reward_bounded():
+    from insurance_claim_validation.environment.rewards import REWARD_EPS
+
     env = InsuranceClaimEnvironment({"max_steps": 6})
     env.reset(scenario_id="easy_001")
     obs = env.step(ClaimAction(action="analyze_claim", reasoning=_r()))
     assert obs.done is False
-    assert 0.0 <= (obs.reward or 0) <= 1.0
+    assert REWARD_EPS < (obs.reward or 0) < 1.0 - REWARD_EPS
     obs = env.step(ClaimAction(action="approve_claim", reasoning=_r(recommendation="approve_claim")))
     assert obs.done is True
-    assert 0.0 <= (obs.reward or 0) <= 1.0
+    assert REWARD_EPS < (obs.reward or 0) < 1.0 - REWARD_EPS
 
 
 def test_max_steps_forces_terminal():

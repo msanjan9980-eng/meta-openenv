@@ -19,9 +19,14 @@ from pydantic import BaseModel
 
 from openenv.core.env_server import create_app
 
-from insurance_claim_validation.environment.core import InsuranceClaimEnvironment
-from insurance_claim_validation.environment.scenarios import ScenarioGenerator
-from insurance_claim_validation.models import ClaimAction, ClaimObservation
+try:
+    from insurance_claim_validation.environment.core import InsuranceClaimEnvironment
+    from insurance_claim_validation.environment.scenarios import ScenarioGenerator
+    from insurance_claim_validation.models import ClaimAction, ClaimObservation
+except ImportError:
+    from environment.core import InsuranceClaimEnvironment
+    from environment.scenarios import ScenarioGenerator
+    from models import ClaimAction, ClaimObservation
 
 
 def _make_env() -> InsuranceClaimEnvironment:

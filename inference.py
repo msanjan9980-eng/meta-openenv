@@ -169,7 +169,8 @@ async def run_task(client: OpenAI, task: Dict) -> float:
                     sr = await http.post("/step", json={"action": action_dict})
                     result = sr.json()
                     obs = result.get("observation", result)
-                    reward = float(result.get("reward") or 0.0)
+                    raw_r = result.get("reward")
+                    reward = max(0.001, min(0.999, float(raw_r))) if raw_r is not None else 0.5
                     done = bool(result.get("done", False))
                     error = None
                 except Exception as se:

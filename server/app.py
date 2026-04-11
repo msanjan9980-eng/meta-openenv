@@ -139,4 +139,4 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
-    main(host=args.host, port=args.port)
+    main()

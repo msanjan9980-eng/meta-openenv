@@ -184,7 +184,8 @@ async def run_task(client: OpenAI, task: Dict) -> float:
                 if done:
                     break
         total = sum(rewards)
-        score = min(max(total / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0, 0.0), 1.0)
+        raw_score = total / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.5
+        score = max(0.001, min(0.999, raw_score))
         success = score >= SUCCESS_SCORE_THRESHOLD
     except Exception as exc:
         print(f"[DEBUG] Episode error: {exc}", flush=True)

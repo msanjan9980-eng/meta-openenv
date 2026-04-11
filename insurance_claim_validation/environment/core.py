@@ -107,7 +107,15 @@ class InsuranceClaimEnvironment(Environment[ClaimAction, ClaimObservation, State
         **kwargs: Any,
     ) -> ClaimObservation:
         if self._done or self._scenario is None:
-            raise RuntimeError("Episode finished; call reset().")
+            obs = self._make_observation() if self._scenario is not None else None
+            if obs is not None:
+                obs.reward = squeeze_to_open_interval(0.1)
+                obs.done = True
+                return obs
+            obs2 = self._make_observation()
+            obs2.reward = squeeze_to_open_interval(0.1)
+            obs2.done = True
+            return obs2
 
         prev = self._action_history[-1].action if self._action_history else None
         self._action_history.append(action)

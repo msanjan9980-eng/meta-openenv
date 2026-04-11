@@ -124,7 +124,11 @@ def environment_stats() -> Dict[str, Any]:
 def main(host: str = "0.0.0.0", port: int = 7860) -> None:
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        "insurance_claim_validation.server.app:app",
+        host=host,
+        port=port,
+    )
 
 
 if __name__ == "__main__":

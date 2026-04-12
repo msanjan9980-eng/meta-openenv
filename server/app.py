@@ -1,3 +1,20 @@
+
+@app.get("/")
+def root():
+    return {
+        "name": "Insurance Claim Validation Environment",
+        "description": "OpenEnv-compatible RL environment for insurance claim validation and fraud detection.",
+        "version": "1.0.0",
+        "links": {
+            "docs": "/docs",
+            "health": "/health",
+            "schema": "/schema",
+            "scenarios": "/scenarios",
+            "reset": "/reset",
+            "step": "/step"
+        }
+    }
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # SPDX-License-Identifier: BSD-3-Clause

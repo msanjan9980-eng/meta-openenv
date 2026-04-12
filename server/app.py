@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Body, FastAPI
 from pydantic import BaseModel
 
-from openenv.core.env_server import create_app
+from openenv.core.env_server import create_web_interface_app as create_app
 
 try:
     from insurance_claim_validation.environment.core import InsuranceClaimEnvironment
